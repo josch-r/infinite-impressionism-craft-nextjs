@@ -1,21 +1,31 @@
 export const defaultElement = [
   {
-    text: "ไฟ",
+    text: "Farbe",
     emoji: "🔥",
     discovered: false,
   },
   {
-    text: "น้ำ",
+    text: "Paris",
     emoji: "💧",
     discovered: false,
   },
   {
-    text: "ลม",
+    text: "kritik",
     emoji: "💨",
     discovered: false,
   },
   {
-    text: "ดิน",
+    text: "Bewegung",
+    emoji: "🌍",
+    discovered: false,
+  },
+  {
+    text: "Künstler",
+    emoji: "🌍",
+    discovered: false,
+  },
+  {
+    text: "Pinsel",
     emoji: "🌍",
     discovered: false,
   },

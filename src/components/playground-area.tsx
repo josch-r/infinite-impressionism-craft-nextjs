@@ -64,30 +64,6 @@ export const PlaygroundArea = ({
       <div className="absolute top-0 left-0 p-4 cursor-pointer">
         <ChangeThemeButton />
       </div>
-      <a
-        href="https://github.com/moonshot-consult/infinite-craft-nextjs"
-        target="_blank"
-      >
-        <div className="absolute flex items-center bottom-0 right-0 p-4 gap-2">
-          <Image
-            src="github-mark.svg"
-            className="block dark:hidden"
-            alt="github logo"
-            width={25}
-            height={25}
-            loading="lazy"
-          />
-          <Image
-            src="github-mark-white.svg"
-            className="hidden dark:block "
-            alt="github logo"
-            width={25}
-            height={25}
-            loading="lazy"
-          />
-          <p>Infinite Craft Next.JS by Moonshot Consult team</p>
-        </div>
-      </a>
     </div>
   );
 };

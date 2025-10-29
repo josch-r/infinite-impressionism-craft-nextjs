@@ -1,11 +1,66 @@
 import { Element, ElementModel } from "@/interfaces/element";
 import connectDb from "@/libs/connect-db";
 import type { NextApiRequest, NextApiResponse } from "next";
-import OpenAI from "openai";
+// Use the local Ollama daemon to generate text with the qwen2.5:3b model.
+// We use the builtin fetch API available in Node 18+/Next.js server runtime.
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+async function generateWithOllama(prompt: string): Promise<string> {
+  const res = await fetch("http://127.0.0.1:11434/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "mistral:7b",
+      prompt,
+      max_tokens: 16,
+      temperature: 0.2,
+      top_p: 0.6,
+      // stream disabled for simplicity; enable streaming if needed later
+      stream: false,
+    }),
+  });
+
+  const text = await res.text();
+  // Ollama responses can be JSON or plain text depending on version/config.
+  try {
+    const data = JSON.parse(text);
+
+    // Try a few common response shapes produced by Ollama
+    if (typeof data === "object" && data !== null) {
+      // shape: { response: "..." }
+      if (typeof data.response === "string") return data.response.trim();
+
+      // shape: { choices: [{ content: [{ type: 'output_text', text: '...' }] }] }
+      if (Array.isArray(data.choices) && data.choices[0]) {
+        const choice = data.choices[0];
+        if (choice?.content && Array.isArray(choice.content)) {
+          const joined = choice.content
+            .map((c: any) => (typeof c.text === "string" ? c.text : ""))
+            .join("");
+          if (joined.trim()) return joined.trim();
+        }
+        // older shape: choices[0].text
+        if (typeof choice.text === "string") return choice.text.trim();
+      }
+
+      // shape: { output: [{ content: [{ text: '...' }] }] }
+      if (Array.isArray((data as any).output) && (data as any).output[0]) {
+        const out = (data as any).output[0];
+        if (out?.content && Array.isArray(out.content)) {
+          const joined = out.content
+            .map((c: any) => (typeof c.text === "string" ? c.text : ""))
+            .join("");
+          if (joined.trim()) return joined.trim();
+        }
+      }
+    }
+  } catch (e) {
+    // not JSON, fall through to return raw text
+  }
+
+  return text.trim();
+}
 
 type ResponseData = {
   message: string;
@@ -50,53 +105,114 @@ export default async function handler(
     });
   }
 
-  // Generate new combination via OpenAI
+  // Generate new combination via Ollama
   try {
-    const chatCompletion = await openai.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: `
-          You are a linguistics expert.
-          Generate a meaningful word that represents or relates to the two provided words.
+    const systemPrompt = `
+Du bist eine Wissensdatenbank für Impressionismus (1870–1910, Frankreich, Deutschland).
 
-          Your response must follow this exact format:
-          [emoji],[word in the same language as the input words]
-          
-          Example 1:
-          air and water = 💧,rain
+Du erhältst zwei Begriffe. Deine Aufgabe:
+Gib **ein Emoji und einen einzigen passenden deutschen Fachbegriff, Motiv, Technik oder Namen** aus dem echten Impressionismus-Kontext (historisch relevant). 
 
-          Example 2:
-          wind and sun = 🌬️,breeze
+KENNZEICHEN:
+- KEIN Werktitel!
+- KEIN Künstler außerhalb des Impressionismus (nur: Monet, Renoir, Morisot, Manet, Degas, Caillebotte, Sisley, Pissarro, Cassatt, Bazille, Guillaumin, u.ä.)
+- KEINE Sätze, KEINE Erklärungen, KEINE neuen Kunstbegriffe.
+- KEIN Metapher, KEIN Fließtext.
+- KEIN Wiederholen eines der Eingabewörter.
+- KEINE Fantasiebegriffe.
 
-          Example 3:
-          fire and water = 🔥,steam
+Nutze NUR Begriffe, Namen und Motive aus den folgenden Beispielen oder wähle einen etablierten Begriff, der im Kunstmuseum, im Katalog oder in Lehrbüchern verwendet wird.
 
-          Example 4:
-          earth and water = 🌊,mud
+Beispiele:
+🎨,Monet
+👩‍🎨,Morisot
+🖼️,Pleinairmalerei
+✨,Lichtstimmung
+🌄,Landschaftsmalerei
+💬,Kunstkritik
+🏛️,Salon de Paris
+🧑‍💼,Durand-Ruel
+🏺,Wildenstein
+🎁,Schenkung
+🖌️,Pinselstrich
+🌿,Naturmotiv
+👤,Caillebotte
+🗞️,Kunstjournalismus
+☕,Café Guerbois
 
-          Example 5:
-          earth and fire = 🌋,lava
-          `,
-        },
-        { role: "user", content: `${sortedWord1} and ${sortedWord2} =` },
-      ],
-      model: "gpt-4o-mini",
-      max_tokens: 512,
-    });
+INPUT: '${sortedWord1}', '${sortedWord2}'
+OUTPUT:
 
-    const output = chatCompletion.choices[0]?.message?.content?.trim();
+`;
+    //     const systemPrompt = `
+    // Du bist ein*e Expert*in für Impressionismus und Kunstnetzwerke.
+    // Du erhältst zwei Begriffe und gibst EINEN passenden Begriff im Format [EMOJI],[deutscher Begriff] aus.
+    // Wähle IMMER einen authentischen, thematisch passenden Begriff, keine Fantasie, keine Wiederholung, keine Erklärung.
+    // Nutze IMMER verschiedene Begriffe/Namen, wenn es passt.
+
+    // Beispiele:
+    // 🧑‍💼,Durand-Ruel
+    // 👤,Caillebotte
+    // 👩‍🎨,Morisot
+    // 🍃,Pleinair
+    // ✉️,Presseerklärung
+    // 🖼️,Ausstellungssaal
+    // 🎭,Salon de Paris
+    // 🔗,Künstlergemeinschaft
+    // 💬,Kunststreit
+    // 🏛️,Wildenstein
+    // ✨,Lichtreflex
+    // 🏺,Museumsbestand
+    // ☕,Café Guerbois
+    // 👥,Gruppendynamik
+    // 🔍,Kunstrecherche
+    // 🎤,Kunstkritik
+    // 🚲,Montmartre
+    // 🌆,Boulevard
+    // 🎨,Impressionismus
+    // 📸,Fotografie
+
+    // INPUT: '${sortedWord1}', '${sortedWord2}'
+    // OUTPUT:
+
+    // `;
+
+    const output = await generateWithOllama(systemPrompt);
     if (!output) {
-      throw new Error("No output generated by OpenAI");
+      throw new Error("No output generated by Ollama");
+    }
+    console.log("Ollama output:", output);
+    // Parse the output - extract only the first line
+    const firstLine = output.split("\n")[0].trim();
+    const splitOutput = firstLine.split(",");
+    if (splitOutput.length < 2) {
+      console.warn(
+        `Invalid format: expected at least 2 parts, got ${splitOutput.length} from: "${firstLine}"`
+      );
+      throw new Error("Invalid format in Ollama response");
     }
 
-    // Parse the output
-    const splitOutput = output.split(",");
-    if (splitOutput.length !== 2) {
-      throw new Error("Invalid format in OpenAI response");
+    let [emoji, text] = splitOutput.map((item: string) => item.trim());
+
+    // Extract text before any explanatory parentheses or excessive punctuation
+    // This allows multi-word terms like "Claude Monet" or "Salon de Paris" but cuts off explanations
+    const parenIndex = text.indexOf("(");
+    if (parenIndex !== -1) {
+      text = text.substring(0, parenIndex).trim();
     }
 
-    const [emoji, text] = splitOutput.map((item) => item.trim());
+    // Validate: text should not be empty and should be reasonably short
+    if (!text || text.length < 2 || text.length > 50) {
+      console.warn(`Invalid text length: "${text}"`);
+      throw new Error("Invalid text output from Ollama");
+    }
+
+    // Validate: emoji should be a single emoji (basic check)
+    if (!emoji || emoji.length > 4) {
+      console.warn(`Invalid emoji: "${emoji}"`);
+      throw new Error("Invalid emoji output from Ollama");
+    }
+
     const normalizedText = text.toLowerCase();
 
     // Check if generated text already exists in the database
